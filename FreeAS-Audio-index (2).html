@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FreeAS Audio — Free Audio Tools</title>
+<style>
+:root{color-scheme:dark;--bg:#100b1e;--panel:#211433;--accent:#a66cff;--text:#f6efff;--muted:#b9a8ce}
+*{box-sizing:border-box}
+body{margin:0;background:radial-gradient(circle at top,#2c1648,#100b1e 55%);font:16px system-ui;color:var(--text);min-height:100vh}
+header{text-align:center;padding:28px 18px;border-bottom:1px solid #ffffff20}
+h1{margin:0;font-size:clamp(28px,7vw,42px)}h1 span{color:#c49aff}
+header p{color:var(--muted);margin:8px 0 0}
+main{max-width:760px;margin:28px auto;padding:0 15px}
+.card{background:#211433dd;border:1px solid #ffffff20;border-radius:18px;padding:22px;box-shadow:0 12px 35px #0003}
+.drop{display:block;text-align:center;border:2px dashed #8057ad;padding:25px 15px;border-radius:14px;cursor:pointer;background:#170d26}
+.drop strong{display:block;font-size:20px}.drop small{color:var(--muted)}
+input[type=file]{display:none}
+#filename{color:#cbb5eb;overflow-wrap:anywhere;margin:12px 0}
+audio{width:100%;margin:12px 0}
+.control{margin:18px 0}
+label{display:flex;justify-content:space-between;gap:12px;margin-bottom:9px}
+input[type=range]{width:100%;accent-color:var(--accent)}
+button{width:100%;padding:14px;background:var(--accent);color:#180b27;border:0;border-radius:12px;font-weight:700;font-size:16px;cursor:pointer;margin-top:12px}
+button:disabled{opacity:.45;cursor:not-allowed}
+.note{color:var(--muted);font-size:13px;line-height:1.5}
+footer{text-align:center;padding:25px;color:var(--muted);font-size:13px}
+</style>
+</head>
+<body>
+<header><h1>🎵 FreeAS <span>Audio</span></h1><p>Free audio tools. Simple, fast, and accessible.</p></header>
+<main><section class="card">
+<label class="drop" for="file"><strong>🎧 Pilih file audio</strong><small>MP3, WAV, OGG, dan format audio browser lainnya</small></label>
+<input id="file" type="file" accept="audio/*">
+<div id="filename">Belum ada file dipilih.</div>
+<audio id="player" controls></audio>
+<div class="control"><label for="speed">Kecepatan <b id="speedVal">1.00×</b></label><input id="speed" type="range" min="0.5" max="2.7" step="0.05" value="1"></div>
+<div class="control"><label for="volume">Volume <b id="volumeVal">100%</b></label><input id="volume" type="range" min="0" max="2" step="0.01" value="1"></div>
+<div class="control"><label for="gain">Amplify (gain) <b id="gainVal">0 dB</b></label><input id="gain" type="range" min="-24" max="12" step="1" value="0"><p class="note">Gain memengaruhi ekspor WAV. Nilai -8 dB mengurangi level audio.</p></div>
+<button id="export" disabled>Ekspor WAV</button>
+<p class="note">Pemrosesan dilakukan di browser perangkat kamu. Untuk file besar, proses mungkin memerlukan waktu dan memori. Hasil WAV menggunakan pengaturan speed dan gain.</p>
+</section></main>
+<footer>© <span id="year"></span> FreeAS Audio · Gratis digunakan</footer>
+<script>
+const file=document.querySelector('#file'),player=document.querySelector('#player'),speed=document.querySelector('#speed'),volume=document.querySelector('#volume'),gain=document.querySelector('#gain'),exportBtn=document.querySelector('#export');
+let audioBuffer=null,objectUrl=null;
+document.querySelector('#year').textContent=new Date().getFullYear();
+file.onchange=async()=>{
+ const f=file.files[0];if(!f)return;
+ if(objectUrl)URL.revokeObjectURL(objectUrl);
+ objectUrl=URL.createObjectURL(f);player.src=objectUrl;
+ document.querySelector('#filename').textContent=f.name;
+ exportBtn.disabled=true;audioBuffer=null;
+ try{const ctx=new (window.AudioContext||window.webkitAudioContext)();audioBuffer=await ctx.decodeAudioData(await f.arrayBuffer());await ctx.close();exportBtn.disabled=false}
+ catch(e){alert('Browser tidak dapat membaca file untuk ekspor WAV. Coba file audio lain.')}
+};
+speed.oninput=()=>{player.playbackRate=+speed.value;document.querySelector('#speedVal').textContent=(+speed.value).toFixed(2)+'×'};
+volume.oninput=()=>{player.volume=Math.min(1,+volume.value);document.querySelector('#volumeVal').textContent=Math.round(+volume.value*100)+'%';if(+volume.value>1)player.volume=1};
+gain.oninput=()=>document.querySelector('#gainVal').textContent=gain.value+' dB';
+exportBtn.onclick=()=>{
+ if(!audioBuffer)return;
+ exportBtn.disabled=true;exportBtn.textContent='Memproses…';
+ setTimeout(()=>{
+ try{
+ const rate=+speed.value,ch=audioBuffer.numberOfChannels,srcLen=audioBuffer.length,outLen=Math.ceil(srcLen/rate),sr=audioBuffer.sampleRate;
+ const channels=Array.from({length:ch},(_,c)=>audioBuffer.getChannelData(c));
+ const samples=new Float32Array(outLen*ch),g=Math.pow(10,+gain.value/20);
+ for(let i=0;i<outLen;i++){const pos=i*rate,a=Math.floor(pos),b=Math.min(a+1,srcLen-1),frac=pos-a;for(let c=0;c<ch;c++)samples[i*ch+c]=(channels[c][a]*(1-frac)+channels[c][b]*frac)*g}
+ const bytes=44+samples.length*2,buf=new ArrayBuffer(bytes),v=new DataView(buf);let p=0;
+ const str=s=>{for(let i=0;i<s.length;i++)v.setUint8(p++,s.charCodeAt(i))};
+ str('RIFF');v.setUint32(p,bytes-8,true);p+=4;str('WAVE');str('fmt ');v.setUint32(p,16,true);p+=4;v.setUint16(p,1,true);p+=2;v.setUint16(p,ch,true);p+=2;v.setUint32(p,sr,true);p+=4;v.setUint32(p,sr*ch*2,true);p+=4;v.setUint16(p,ch*2,true);p+=2;v.setUint16(p,16,true);p+=2;str('data');v.setUint32(p,samples.length*2,true);p+=4;
+ for(let x of samples){x=Math.max(-1,Math.min(1,x));v.setInt16(p,x<0?x*32768:x*32767,true);p+=2}
+ const blob=new Blob([buf],{type:'audio/wav'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='FreeAS-Audio.wav';a.click();URL.revokeObjectURL(url)
+ }catch(e){alert('Ekspor gagal: '+e.message)}finally{exportBtn.disabled=false;exportBtn.textContent='Ekspor WAV'}
+ },50)
+};
+</script>
+</body></html>
